@@ -1,0 +1,203 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Chart.Name }}-db-migrations-hook
+  labels:
+    {{- include "OpenMetadata.labels" . | indent 4 }}
+  annotations:
+    "helm.sh/hook": pre-upgrade 
+    "helm.sh/hook-weight": "-1" # we use a smaller weight so it's created before the job  
+    "helm.sh/hook-delete-policy": before-hook-creation, hook-succeeded
+spec:
+  template:
+    metadata:
+      labels:
+        {{- include "OpenMetadata.labels" . | indent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{ toYaml .}}
+      {{- end }}
+      creationTimestamp: null
+    spec:
+      containers:
+      - command:
+        - /bin/bash
+        args:
+        - -c
+        - ./db-migrations/check_db_migrations.sh
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        name: {{ .Chart.Name }}-db-migrations-hook
+        env:
+          - name: OPENMETADATA_CLUSTER_NAME
+            value: "{{ .Values.global.clusterName }}"
+          - name: LOG_LEVEL
+            value: "{{ .Values.global.logLevel }}"
+          - name: SERVER_HOST
+            value: "{{ .Values.global.openmetadata.host }}"
+          - name: SERVER_PORT
+            value: "{{ .Values.global.openmetadata.port }}"
+          - name: SERVER_ADMIN_PORT
+            value: "{{ .Values.global.openmetadata.adminPort }}"
+          - name: AUTHENTICATION_PROVIDER
+            value: "{{ .Values.global.authentication.provider }}"
+          - name: AUTHENTICATION_PUBLIC_KEYS
+            value: '[{{ include "OpenMetadata.commaJoinedQuotedList" (dict "value" .Values.global.authentication.publicKeys) }}]'
+          - name: AUTHENTICATION_AUTHORITY
+            value: "{{ .Values.global.authentication.authority }}"
+          - name: AUTHENTICATION_CLIENT_ID
+            value: "{{ .Values.global.authentication.clientId }}"
+          - name: AUTHENTICATION_CALLBACK_URL
+            value: "{{ .Values.global.authentication.callbackUrl }}"
+          - name: AUTHENTICATION_JWT_PRINCIPAL_CLAIMS
+            value: '[{{ include "OpenMetadata.commaJoinedQuotedList" (dict "value" .Values.global.authentication.jwtPrincipalClaims) }}]'
+          - name: AUTHENTICATION_ENABLE_SELF_SIGNUP
+            value: "{{ .Values.global.authentication.enableSelfSignup }}"
+          - name: OM_MAX_FAILED_LOGIN_ATTEMPTS
+            value: "{{ .Values.global.basicLogin.maxLoginFailAttempts }}"
+          - name: OM_LOGIN_ACCESS_BLOCKTIME
+            value: "{{ .Values.global.basicLogin.accessBlockTime }}"
+          - name: AUTHORIZER_CLASS_NAME
+            value: "{{ .Values.global.authorizer.className }}"
+          - name: AUTHORIZER_REQUEST_FILTER
+            value: "{{ .Values.global.authorizer.containerRequestFilter }}"
+          - name: AUTHORIZER_ADMIN_PRINCIPALS
+            value: '[{{ include "OpenMetadata.commaJoinedQuotedList" (dict "value" .Values.global.authorizer.initialAdmins) }}]'
+          - name: AUTHORIZER_PRINCIPAL_DOMAIN
+            value: "{{ .Values.global.authorizer.principalDomain }}"
+          - name: AUTHORIZER_ENFORCE_PRINCIPAL_DOMAIN
+            value: "{{ .Values.global.authorizer.enforcePrincipalDomain }}"
+          - name: AUTHORIZER_ENABLE_SECURE_SOCKET
+            value: "{{ .Values.global.authorizer.enableSecureSocketConnection }}"
+          - name: AUTHORIZER_ALLOWED_REGISTRATION_DOMAIN
+            value: '[{{ include "OpenMetadata.commaJoinedQuotedList" (dict "value" .Values.global.authorizer.allowedEmailRegistrationDomains) }}]'
+          {{- if .Values.global.jwtTokenConfiguration.enabled }}
+          - name: RSA_PUBLIC_KEY_FILE_PATH
+            value: "{{ .Values.global.jwtTokenConfiguration.rsapublicKeyFilePath }}"
+          - name: RSA_PRIVATE_KEY_FILE_PATH
+            value: "{{ .Values.global.jwtTokenConfiguration.rsaprivateKeyFilePath }}"
+          - name: JWT_ISSUER
+            value: "{{ .Values.global.jwtTokenConfiguration.jwtissuer }}"
+          - name: JWT_KEY_ID
+            value: "{{ .Values.global.jwtTokenConfiguration.keyId }}"
+          {{- end }}
+          {{- if .Values.global.fernetkey.secretRef }}
+          - name: FERNET_KEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.global.fernetkey.secretRef }}
+                key: {{ .Values.global.fernetkey.secretKey }}
+          {{ else }}
+          - name: FERNET_KEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ include "OpenMetadata.fullname" . }}-secret 
+                key: FERNET_KEY
+          {{- end }}
+          - name: EVENT_MONITOR
+            value: "{{ .Values.global.eventMonitor.type }}"
+          - name: EVENT_MONITOR_BATCH_SIZE
+            value: "{{ .Values.global.eventMonitor.batchSize }}"
+          - name: ELASTICSEARCH_HOST
+            value: "{{ .Values.global.elasticsearch.host }}"
+          - name: ELASTICSEARCH_PORT
+            value: "{{ .Values.global.elasticsearch.port }}"
+          - name: ELASTICSEARCH_SCHEME
+            value: "{{ .Values.global.elasticsearch.scheme }}"
+          - name: ELASTICSEARCH_INDEX_MAPPING_LANG
+            value: "{{ .Values.global.elasticsearch.searchIndexMappingLanguage }}"
+          {{- if .Values.global.elasticsearch.auth.enabled -}}
+          {{- with .Values.global.elasticsearch.auth }}
+          - name: ELASTICSEARCH_USER
+            value: "{{ .username }}"
+          - name: ELASTICSEARCH_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .password.secretRef }}
+                key: {{ .password.secretKey }}
+          {{- end }}
+          {{- end }}
+          {{- if .Values.global.elasticsearch.trustStore.enabled }}
+          - name: ELASTICSEARCH_TRUST_STORE_PATH
+            value: {{.Values.global.elasticsearch.trustStore.path }}
+          {{- with .Values.global.elasticsearch.trustStore }}
+          - name: ELASTICSEARCH_TRUST_STORE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .password.secretRef }}
+                key: {{ .password.secretKey }}
+          {{- end }}
+          {{- end }}
+          - name: DB_HOST
+            value: "{{ .Values.global.database.host }}"
+          - name: DB_PORT
+            value: "{{ .Values.global.database.port }}"
+          {{- with .Values.global.database.auth }}
+          - name: DB_USER
+            value: "{{ .username }}"
+          - name: DB_USER_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .password.secretRef }}
+                key: {{ .password.secretKey }}
+          {{- end }}
+          - name: OM_DATABASE
+            value: "{{ .Values.global.database.databaseName }}"
+          - name: DB_DRIVER_CLASS
+            value: "{{ .Values.global.database.driverClass }}"
+          - name: DB_SCHEME
+            value: "{{ .Values.global.database.dbScheme }}"
+          - name: DB_USE_SSL
+            value: "{{ .Values.global.database.dbUseSSL }}"
+          {{- with .Values.extraEnvs }}
+            {{- toYaml . | nindent 10 }}
+          {{- end }}
+        volumeMounts:
+        - name: migration-script
+          mountPath: /db-migrations
+        {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- if .Values.sidecars }}
+        {{- include "tplvalues.render" (dict "value" .Values.sidecars "context" $) | nindent 6 }}
+      {{- end }}
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+        livenessProbe:
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 5
+          exec:
+            command:
+              - cat
+              - /tmp/healthy
+        readinessProbe:
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          failureThreshold: 5
+          exec:
+            command:
+              - cat
+              - /tmp/healthy
+      restartPolicy: Never
+      volumes:
+      - name: migration-script
+        configMap:
+          name: db-migrations-cm-hook
+          defaultMode: 0777
+      {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 6 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+

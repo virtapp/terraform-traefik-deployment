@@ -1,0 +1,258 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "OpenMetadata.fullname" . }}
+  labels:
+    {{- include "OpenMetadata.labels" . | indent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "OpenMetadata.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "OpenMetadata.labels" . | indent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets  }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "OpenMetadata.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+      {{- include "tplvalues.render" (dict "value" .Values.extraInitContainers "context" $) | nindent 8 }}
+      volumes:
+      {{- include "tplvalues.render" (dict "value" .Values.extraVolumes "context" $) | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          volumeMounts:
+          {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 10 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.global.openmetadata.port }}
+              protocol: TCP
+            - name: http-admin
+              containerPort: {{ .Values.global.openmetadata.adminPort }}
+              protocol: TCP
+          livenessProbe:
+            {{ .Values.livenessProbe | toYaml | indent 12 | trim }}
+          readinessProbe:
+            {{ .Values.readinessProbe | toYaml | indent 12 | trim }}
+          env:
+          {{- if .Values.global.fernetkey.secretRef }}
+          - name: FERNET_KEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ .Values.global.fernetkey.secretRef }}
+                key: {{ .Values.global.fernetkey.secretKey }}
+          {{ else }}
+          - name: FERNET_KEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ include "OpenMetadata.fullname" . }}-secret 
+                key: FERNET_KEY
+          {{- end }}
+          - name: EVENT_MONITOR
+            value: "{{ .Values.global.eventMonitor.type }}"
+          - name: EVENT_MONITOR_BATCH_SIZE
+            value: "{{ .Values.global.eventMonitor.batchSize }}"
+          - name: OPENMETADATA_CLUSTER_NAME
+            value: "{{ .Values.global.clusterName }}"
+          - name: LOG_LEVEL
+            value: "{{ .Values.global.logLevel }}"
+          - name: SERVER_HOST
+            value: "{{ .Values.global.openmetadata.host }}"
+          - name: SERVER_PORT
+            value: "{{ .Values.global.openmetadata.port }}"
+          - name: SERVER_ADMIN_PORT
+            value: "{{ .Values.global.openmetadata.adminPort }}"
+          - name: AUTHENTICATION_PROVIDER
+            value: "{{ .Values.global.authentication.provider }}"
+          - name: AUTHENTICATION_PUBLIC_KEYS
+            value: '[{{ include "OpenMetadata.commaJoinedQuotedList" (dict "value" .Values.global.authentication.publicKeys) }}]'
+          - name: AUTHENTICATION_AUTHORITY
+            value: "{{ .Values.global.authentication.authority }}"
+          - name: AUTHENTICATION_CLIENT_ID
+            value: "{{ .Values.global.authentication.clientId }}"
+          - name: AUTHENTICATION_CALLBACK_URL
+            value: "{{ .Values.global.authentication.callbackUrl }}"
+          - name: AUTHENTICATION_JWT_PRINCIPAL_CLAIMS
+            value: '[{{ include "OpenMetadata.commaJoinedQuotedList" (dict "value" .Values.global.authentication.jwtPrincipalClaims) }}]'
+          - name: AUTHENTICATION_ENABLE_SELF_SIGNUP
+            value: "{{ .Values.global.authentication.enableSelfSignup }}"
+          - name: OM_MAX_FAILED_LOGIN_ATTEMPTS
+            value: "{{ .Values.global.basicLogin.maxLoginFailAttempts }}"
+          - name: OM_LOGIN_ACCESS_BLOCKTIME
+            value: "{{ .Values.global.basicLogin.accessBlockTime }}"
+          - name: AUTHORIZER_CLASS_NAME
+            value: "{{ .Values.global.authorizer.className }}"
+          - name: AUTHORIZER_REQUEST_FILTER
+            value: "{{ .Values.global.authorizer.containerRequestFilter }}"
+          - name: AUTHORIZER_ADMIN_PRINCIPALS
+            value: '[{{ include "OpenMetadata.commaJoinedQuotedList" (dict "value" .Values.global.authorizer.initialAdmins) }}]'
+          - name: AUTHORIZER_PRINCIPAL_DOMAIN
+            value: "{{ .Values.global.authorizer.principalDomain }}"
+          - name: AUTHORIZER_ENFORCE_PRINCIPAL_DOMAIN
+            value: "{{ .Values.global.authorizer.enforcePrincipalDomain }}"
+          - name: AUTHORIZER_ENABLE_SECURE_SOCKET
+            value: "{{ .Values.global.authorizer.enableSecureSocketConnection }}"
+          - name: AUTHORIZER_ALLOWED_REGISTRATION_DOMAIN
+            value: '[{{ include "OpenMetadata.commaJoinedQuotedList" (dict "value" .Values.global.authorizer.allowedEmailRegistrationDomains) }}]'
+          {{- if .Values.global.jwtTokenConfiguration.enabled }}
+          - name: RSA_PUBLIC_KEY_FILE_PATH
+            value: "{{ .Values.global.jwtTokenConfiguration.rsapublicKeyFilePath }}"
+          - name: RSA_PRIVATE_KEY_FILE_PATH
+            value: "{{ .Values.global.jwtTokenConfiguration.rsaprivateKeyFilePath }}"
+          - name: JWT_ISSUER
+            value: "{{ .Values.global.jwtTokenConfiguration.jwtissuer }}"
+          - name: JWT_KEY_ID
+            value: "{{ .Values.global.jwtTokenConfiguration.keyId }}"
+          {{- end }}
+          - name: ELASTICSEARCH_HOST
+            value: "{{ .Values.global.elasticsearch.host }}"
+          - name: ELASTICSEARCH_PORT
+            value: "{{ .Values.global.elasticsearch.port }}"
+          - name: ELASTICSEARCH_SCHEME
+            value: "{{ .Values.global.elasticsearch.scheme }}"
+          - name: ELASTICSEARCH_INDEX_MAPPING_LANG
+            value: "{{ .Values.global.elasticsearch.searchIndexMappingLanguage }}"
+          {{- if .Values.global.elasticsearch.auth.enabled -}}
+          {{- with .Values.global.elasticsearch.auth }}
+          - name: ELASTICSEARCH_USER
+            value: "{{ .username }}"
+          - name: ELASTICSEARCH_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .password.secretRef }}
+                key: {{ .password.secretKey }}
+          {{- end }}
+          {{- end }}
+          {{- if .Values.global.elasticsearch.trustStore.enabled }}
+          - name: ELASTICSEARCH_TRUST_STORE_PATH
+            value: {{.Values.global.elasticsearch.trustStore.path }}
+          {{- with .Values.global.elasticsearch.trustStore }}
+          - name: ELASTICSEARCH_TRUST_STORE_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .password.secretRef }}
+                key: {{ .password.secretKey }}
+          {{- end }}
+          {{- end }}
+          - name: DB_HOST
+            value: "{{ .Values.global.database.host }}"
+          - name: DB_PORT
+            value: "{{ .Values.global.database.port }}"
+          {{- with .Values.global.database.auth }}
+          - name: DB_USER
+            value: "{{ .username }}"
+          - name: DB_USER_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .password.secretRef }}
+                key: {{ .password.secretKey }}
+          {{- end }}
+          - name: OM_DATABASE
+            value: "{{ .Values.global.database.databaseName }}"
+          - name: DB_DRIVER_CLASS
+            value: "{{ .Values.global.database.driverClass }}"
+          - name: DB_SCHEME
+            value: "{{ .Values.global.database.dbScheme }}"
+          - name: DB_USE_SSL
+            value: "{{ .Values.global.database.dbUseSSL }}"
+          {{- if .Values.global.airflow.enabled }}
+          - name: AIRFLOW_HOST
+            value: "{{ .Values.global.airflow.host }}"
+          {{- with .Values.global.airflow.auth }}
+          - name: AIRFLOW_USERNAME
+            value: "{{ .username }}"
+          - name: AIRFLOW_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .password.secretRef }}
+                key: {{ .password.secretKey }}
+          {{- end }}
+          - name: AIRFLOW_VERIFY_SSL
+            value: "{{ .Values.global.airflow.verifySsl }}"
+          - name: AIRFLOW_SSL_CERT_PATH
+            value: "{{ .Values.global.airflow.sslCertificatePath }}"
+          - name: SERVER_HOST_API_URL
+            value: "{{ .Values.global.airflow.openmetadata.serverHostApiUrl }}"
+          {{- end }}
+          - name: SECRET_MANAGER
+            value: "{{ .Values.global.secretsManager.provider }}"
+          {{- if .Values.global.secretsManager.additionalParameters.enabled }}
+          - name: OM_SM_REGION
+            value: "{{ .Values.global.secretsManager.additionalParameters.region }}"
+          {{- with .Values.global.secretsManager.additionalParameters.accessKeyId }}
+          - name: OM_SM_ACCESS_KEY_ID
+            valueFrom:
+              secretKeyRef:
+                name: {{ .secretRef }}
+                key: {{ .secretKey }}
+          {{- end }}
+          {{- with .Values.global.secretsManager.additionalParameters.secretAccessKey }}
+          - name: OM_SM_ACCESS_KEY
+            valueFrom:
+              secretKeyRef:
+                name: {{ .secretRef }}
+                key: {{ .secretKey }}
+          {{- end }}
+          {{- end }}
+          {{- if .Values.global.smtpConfig.enableSmtpServer }}
+          - name: OM_EMAIL_ENTITY
+            value: "{{ .Values.global.smtpConfig.emailingEntity }}"
+          - name: OM_SUPPORT_URL
+            value: "{{ .Values.global.smtpConfig.supportUrl }}"
+          - name: AUTHORIZER_ENABLE_SMTP
+            value: "{{ .Values.global.smtpConfig.enableSmtpServer }}"
+          - name: OPENMETADATA_SERVER_URL
+            value: "{{ .Values.global.smtpConfig.openMetadataUrl }}"
+          - name: SMTP_SERVER_ENDPOINT
+            value: "{{ .Values.global.smtpConfig.serverEndpoint }}"
+          - name: SMTP_SERVER_PORT
+            value: "{{ .Values.global.smtpConfig.serverPort }}"
+          - name: SMTP_SERVER_USERNAME
+            value: "{{ .Values.global.smtpConfig.username }}"
+          {{- with .Values.global.smtpConfig.password }}
+          - name: SMTP_SERVER_PWD
+            valueFrom:
+              secretKeyRef:
+                name: {{ .secretRef }}
+                key: {{ .secretKey }}
+          {{- end }}
+          - name: SMTP_SERVER_STRATEGY
+            value: "{{ .Values.global.smtpConfig.transportationStrategy }}"
+          {{- end }}
+          {{- with .Values.extraEnvs }}
+            {{- toYaml . | nindent 10 }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+        {{- if .Values.sidecars }}
+          {{- include "tplvalues.render" (dict "value" .Values.sidecars "context" $) | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      
